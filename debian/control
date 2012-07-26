@@ -1,4 +1,4 @@
-Source: djangoopenstackauth
+Source: django-openstack-auth
 Maintainer: Nebula Voyager <voyager@nebula.com>
 Section: python
 Priority: optional
@@ -8,7 +8,7 @@ Build-Depends: python-setuptools (>= 0.6b3),
 XS-Python-Version: >=2.6
 Standards-Version: 3.8.4
 
-Package: python-djangoopenstackauth
+Package: python-django-openstack-auth
 Architecture: all
 Homepage: https://github.com/4P/python-django-openstack-auth
 Depends: ${misc:Depends}, ${python:Depends},
