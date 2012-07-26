@@ -1,4 +1,4 @@
-Source: django-openstack-auth
+Source: djangoopenstackauth
 Maintainer: Nebula Voyager <voyager@nebula.com>
 Section: python
 Priority: optional
