@@ -1,3 +1,9 @@
+djangoopenstackauth (1.0.1~1nebula) UNRELEASED; urgency=low
+
+  * Use native source format
+
+ -- Anthony Young <sleepsonthefloor@gmail.com>  Mon, 24 Sep 2012 12:41:17 -0700
+
 djangoopenstackauth (1.0.1-1) UNRELEASED; urgency=low
 
   * source package automatically created by stdeb 0.6.0
