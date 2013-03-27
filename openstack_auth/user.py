@@ -1,12 +1,15 @@
 import hashlib
 import logging
 
-from django.contrib.auth.models import AnonymousUser
-
 from keystoneclient.v2_0 import client as keystone_client
 from keystoneclient import exceptions as keystone_exceptions
 
 from .utils import check_token_expiration, is_ans1_token
+
+try:
+    import django.contrib.auth.models import AbstractUser
+except ImportError:
+    import django.contrib.auth.models import AnonymousUser as AbstractUser
 
 
 LOG = logging.getLogger(__name__)
@@ -37,7 +40,7 @@ def create_user_from_token(request, token, endpoint):
                 endpoint=endpoint)
 
 
-class User(AnonymousUser):
+class User(AbstractUser):
     """ A User class with some extra special sauce for Keystone.
 
     In addition to the standard Django user attributes, this class also has
