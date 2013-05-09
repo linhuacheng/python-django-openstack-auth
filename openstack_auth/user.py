@@ -3,31 +3,44 @@ import logging
 
 from django.contrib.auth.models import AnonymousUser
 from django.conf import settings
-
-from keystoneclient.v2_0 import client as keystone_client
 from keystoneclient import exceptions as keystone_exceptions
 
-from .utils import check_token_expiration, is_ans1_token
+from .utils import check_token_expiration, is_ans1_token, \
+    get_keystone_version
+
+if get_keystone_version() < 3:
+    from keystoneclient.v2_0 import client as keystone_client
+else:
+    from keystoneclient.v3 import client as keystone_client
 
 
 LOG = logging.getLogger(__name__)
 
 
 def set_session_from_user(request, user):
-    if is_ans1_token(user.token.id):
-        hashed_token = hashlib.md5(user.token.id).hexdigest()
-        user.token._info['token']['id'] = hashed_token
+    if get_keystone_version() < 3:
+        if is_ans1_token(user.token.id):
+            hashed_token = hashlib.md5(user.token.id).hexdigest()
+            user.token._info['token']['id'] = hashed_token
+        request.session['token'] = user.token._info
+    else:
+        if is_ans1_token(user.token.auth_token):
+            hashed_token = hashlib.md5(user.token.auth_token).hexdigest()
+            user.token.id = hashed_token
+            user.token._auth_token = hashed_token
+        request.session['token'] = user.token
+
     if 'token_list' not in request.session:
         request.session['token_list'] = []
     token_tuple = (user.endpoint, user.token.id)
     request.session['token_list'].append(token_tuple)
-    request.session['token'] = user.token._info
     request.session['user_id'] = user.id
     request.session['region_endpoint'] = user.endpoint
 
 
 def create_user_from_token(request, token, endpoint):
-    return User(id=token.user['id'],
+    if get_keystone_version() < 3:
+        return User(id=token.user['id'],
                 token=token,
                 user=token.user['name'],
                 tenant_id=token.tenant['id'],
@@ -36,6 +49,17 @@ def create_user_from_token(request, token, endpoint):
                 service_catalog=token.serviceCatalog,
                 roles=token.user['roles'],
                 endpoint=endpoint)
+    else:
+        # KS V3 returns AccessInfo object that a slight different interface
+        return User(id=token.user_id,
+                    token=token,
+                    user=token.username,
+                    tenant_id=token.project_id,
+                    tenant_name=token.project_name,
+                    enabled=True,
+                    service_catalog=token['catalog'],
+                    roles=token['roles'],
+                    endpoint=endpoint)
 
 
 class User(AnonymousUser):
@@ -65,13 +89,14 @@ class User(AnonymousUser):
         A list of dictionaries containing role names and ids as returned
         by Keystone.
     """
-    def __init__(self, id=None, token=None, user=None, tenant_id=None,
+    def __init__(self, id=None, token=None, user=None, domain_id=None, tenant_id=None,
                     service_catalog=None, tenant_name=None, roles=None,
                     authorized_tenants=None, endpoint=None, enabled=False):
         self.id = id
         self.pk = id
         self.token = token
         self.username = user
+        self.domain_id = domain_id
         self.tenant_id = tenant_id
         self.tenant_name = tenant_name
         self.service_catalog = service_catalog
@@ -126,11 +151,25 @@ class User(AnonymousUser):
             endpoint = self.endpoint
             token = self.token
             try:
-                client = keystone_client.Client(username=self.username,
-                                                auth_url=endpoint,
-                                                token=token.id,
-                                                insecure=insecure)
-                self._authorized_tenants = client.tenants.list()
+                if get_keystone_version() < 3:
+                    client = keystone_client.Client(username=self.username,
+                                                    auth_url=endpoint,
+                                                    token=token.id,
+                                                    insecure=insecure)
+                    self._authorized_tenants = client.tenants.list()
+                else:
+                    # FIXME: Keystone is returning V2 endpoint, auth with V3
+                    # Until we have everything in V3, need to keep this around.
+                    v3_endpoint = endpoint.replace('v2.0', 'v3')
+                    client = keystone_client.Client(username=self.username,
+                                                    auth_url=v3_endpoint,
+                                                    token=token.id,
+                                                    insecure=insecure)
+                    # KS V3 does not return the catalog for unscoped token
+                    # GET Projects require management_url, setting it manually.
+                    client.management_url = v3_endpoint
+                    self._authorized_tenants = client.projects.list(
+                        user=self.id)
             except (keystone_exceptions.ClientException,
                     keystone_exceptions.AuthorizationFailure):
                 LOG.exception('Unable to retrieve tenant list.')

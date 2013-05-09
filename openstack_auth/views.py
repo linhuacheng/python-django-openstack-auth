@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 from threading import Thread
@@ -18,12 +19,16 @@ try:
 except ImportError:
     from .utils import is_safe_url
 
-from keystoneclient.v2_0 import client as keystone_client
 from keystoneclient import exceptions as keystone_exceptions
 
 from .forms import Login
 from .user import set_session_from_user, create_user_from_token
+from .utils import is_ans1_token, get_keystone_version
 
+if get_keystone_version() < 3:
+    from keystoneclient.v2_0 import client as keystone_client
+else:
+    from keystoneclient.v3 import client as keystone_client
 
 LOG = logging.getLogger(__name__)
 
@@ -86,10 +91,17 @@ def delete_all_tokens(token_list):
         try:
             endpoint = token_tuple[0]
             token = token_tuple[1]
-            client = keystone_client.Client(endpoint=endpoint,
-                                            token=token,
-                                            insecure=insecure)
-            client.tokens.delete(token=token)
+
+            if get_keystone_version() < 3:
+                client = keystone_client.Client(endpoint=endpoint,
+                                                token=token,
+                                                insecure=insecure,
+                                                debug=settings.DEBUG)
+                client.tokens.delete(token=token)
+            else:
+                # FIXME: KS-client does not have delete token available
+                # Need to add this later when it is exposed.
+                pass
         except keystone_exceptions.ClientException as e:
             LOG.info('Could not delete token')
 
@@ -101,11 +113,24 @@ def switch(request, tenant_id, redirect_field_name=REDIRECT_FIELD_NAME):
               % (tenant_id, request.user.username))
     insecure = getattr(settings, 'OPENSTACK_SSL_NO_VERIFY', False)
     endpoint = request.user.endpoint
-    client = keystone_client.Client(endpoint=endpoint,
-                                    insecure=insecure)
+
     try:
-        token = client.tokens.authenticate(tenant_id=tenant_id,
-                                        token=request.user.token.id)
+        if get_keystone_version() < 3:
+            client = keystone_client.Client(endpoint=endpoint,
+                                            insecure=insecure)
+
+            token = client.tokens.authenticate(tenant_id=tenant_id,
+                                               token=request.user.token.id)
+        else:
+            # FIXME: Keystone is returning V2 endpoint, auth with V3
+            # Until we have everything in V3, need to keep this around.
+            v3_endpoint = endpoint.replace('v2.0', 'v3')
+            client = keystone_client.Client(project_id=tenant_id,
+                                              token=request.user.token.id,
+                                              auth_url=v3_endpoint,
+                                              insecure=insecure,
+                                              debug=settings.DEBUG)
+            token = client.auth_ref
         LOG.info('Token rescoping successful.')
     except keystone_exceptions.ClientException:
         LOG.warning('Token rescoping failed.')
